@@ -1,6 +1,7 @@
 import logging
 import json
 import requests
+import os
 from datetime import datetime, timedelta
 import azure.functions as func
 from azure.identity import ClientSecretCredential
@@ -10,11 +11,11 @@ from azure.functions import HttpRequest, HttpResponse
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
-# — hard-coded for now —
-TENANT_ID      = "548d26ab-8caa-49e1-97c2-a1b1a06cc39c"
-CLIENT_ID      = "e911a42c-dc2d-4fc4-8b9f-43e28484c1f6"
-CLIENT_SECRET  = "NBN8Q~z0hLgg22PTtxr-8.gLF.U~MHcL9TmFvdy4"
-DATAVERSE_URL  = "https://devglow.crm.dynamics.com"
+# Read from environment
+TENANT_ID     = os.getenv("EV__TENANT_ID")
+CLIENT_ID     = os.getenv("EV__CLIENT_ID")
+CLIENT_SECRET = os.getenv("EV__CLIENT_SECRET")
+DATAVERSE_URL = os.getenv("EV__DATAVERSE_URL")
 
 # Tables & keys
 SPECIAL_KEYS            = ["IngredientList", "ShortIngredientList", "LegalName"]
