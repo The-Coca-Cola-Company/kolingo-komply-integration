@@ -9,12 +9,14 @@ import azure.functions as func
 from azure.identity import ClientSecretCredential
 
 # Configure logging
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
+    logging.WARNING
+)
 logging.basicConfig(level=logging.INFO)
 
 # Read from environment
-TENANT_ID     = os.getenv("EV__TENANT_ID")
-CLIENT_ID     = os.getenv("EV__CLIENT_ID")
+TENANT_ID = os.getenv("EV__TENANT_ID")
+CLIENT_ID = os.getenv("EV__CLIENT_ID")
 CLIENT_SECRET = os.getenv("EV__CLIENT_SECRET")
 DATAVERSE_URL = os.getenv("EV__DATAVERSE_URL")
 
@@ -33,25 +35,31 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         token = get_token()
         logging.info("Successfully retrieved token.")
         case_entity = parse_general_info(data, token)
-        
+
         if not case_entity:
-            return func.HttpResponse("Failed to create case history record.", status_code=500)
+            return func.HttpResponse(
+                "Failed to create case history record.", status_code=500
+            )
         case_id = case_entity.get("cococola_name")
         if not case_id:
-            return func.HttpResponse("Case history created but case ID not found.", status_code=500)
+            return func.HttpResponse(
+                "Case history created but case ID not found.", status_code=500
+            )
         logging.info(f"Case history created with ID: {case_id}")
-        
+
         create_flow_status_record(data, case_id, token)
         parse_language_countries_values(data, case_id, token)
-        
+
         count = parse_translation_items(data, case_id, token)
         logging.info(f"Processed {count} translation items for {case_id}")
-        return func.HttpResponse(f"Processed {count} translation items for {case_id}", status_code=200)
+        return func.HttpResponse(
+            f"Processed {count} translation items for {case_id}", status_code=200
+        )
     except ValueError:
         logging.exception("JSON parsing failed.")
         return func.HttpResponse(
             "Invalid JSON. Ensure Content-Type is 'application/json' and body is properly formatted.",
-            status_code=400
+            status_code=400,
         )
     except Exception:
         logging.exception("Unhandled exception in ProcessProductRegistrationData_http")
@@ -75,9 +83,7 @@ def get_json_body(req: HttpRequest) -> dict:
 def get_token() -> str:
     try:
         credential = ClientSecretCredential(
-            tenant_id=TENANT_ID,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET
+            tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET
         )
         token = credential.get_token(f"{DATAVERSE_URL}/.default")
         return token.token
@@ -98,13 +104,24 @@ def safe_get(value, default=""):
         return default
 
 
+def styles_to_text(styles) -> str:
+    """Serialize styles array to multiline JSON text for Dataverse multiline text column."""
+    try:
+        if styles is None:
+            return ""
+        return json.dumps(styles, ensure_ascii=False, indent=2)
+    except Exception:
+        logging.exception("Failed to serialize styles")
+        return ""
+
+
 def parse_general_info(data: dict, token: str) -> dict:
     try:
         payload = {
             "cococola_requestid": safe_get(data.get("requestId")),
             "cococola_assessmentid": safe_get(data.get("assessmentId")),
-            "cococola_isproductregistration":"Yes",
-            "cococola_casename":"PR - " + safe_get(data.get("requestId"))[-5:]
+            "cococola_isproductregistration": "Yes",
+            "cococola_casename": "PR - " + safe_get(data.get("requestId"))[-5:],
         }
         logging.info(f"Creating case history with payload: {payload}")
         return store_to_dataverse(DATAVERSE_CASEHISTORY_TABLE, payload, token)
@@ -117,9 +134,9 @@ def parse_language_countries_values(data: dict, case_id: str, token: str):
     try:
         logging.info("Parsing Language & Country Combination")
         language = safe_get(data.get("targetLanguage"))
-        country  = safe_get(data.get("country"))
+        country = safe_get(data.get("country"))
         combo = f"{country}$$##{language}"
-        order    = 1
+        order = 1
         if language and country:
             p1 = {
                 "cococola_caseid": case_id,
@@ -128,11 +145,12 @@ def parse_language_countries_values(data: dict, case_id: str, token: str):
                 "cococola_order": str(order),
             }
             p2 = {
+                "cococola_country": country,
                 "cococola_country_language": combo,
-                "cococola_languageorder":    f"lang{order}",
-                "cococola_source":           "KOMPLY",
-                "cococola_destination":      language,
-                "cococola_caseid":           case_id,
+                "cococola_languageorder": f"lang{order}",
+                "cococola_source": "KOMPLY",
+                "cococola_destination": language,
+                "cococola_caseid": case_id,
             }
             store_to_dataverse(DATAVERSE_LANGUAGE_COUNTRY_SELECTION_TABLE, p1, token)
             store_to_dataverse(DATAVERSE_LANGUAGE_ORDER_TABLE, p2, token)
@@ -146,7 +164,7 @@ def create_flow_status_record(data: dict, case_id: str, token: str):
     try:
         logging.info("Creating Flow Status Record")
         payload = {
-            "cococola_caseid":       case_id,
+            "cococola_caseid": case_id,
             "cococola_numberofflows": 10,
         }
         store_to_dataverse(DATAVERSE_TRANSLATION_FLOW_RUN_STATUS_TABLE, payload, token)
@@ -171,7 +189,8 @@ def parse_translation_items(data: dict, case_id: str, token: str) -> int:
                 "cococola_group": safe_get(item.get("group")),
                 "cococola_label": safe_get(item.get("label")),
                 "cococola_key": safe_get(item.get("key")),
-                "cococola_value": safe_get(item.get("value"))
+                "cococola_value": safe_get(item.get("value")),
+                "cococola_sourcestyles": styles_to_text(item.get("styles"))
             }
             store_to_dataverse(DATAVERSE_PRODUCT_REGISTRATION_TABLE, payload, token)
             itemOrder += 1
@@ -184,11 +203,11 @@ def parse_translation_items(data: dict, case_id: str, token: str) -> int:
 def store_to_dataverse(table_name: str, payload: dict, token: str) -> dict:
     try:
         headers = {
-            "Authorization":    f"Bearer {token}",
-            "Content-Type":     "application/json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
             "OData-MaxVersion": "4.0",
-            "OData-Version":    "4.0",
-            "Accept":           "application/json",
+            "OData-Version": "4.0",
+            "Accept": "application/json",
         }
         url = f"{DATAVERSE_URL}/api/data/v9.2/{table_name}"
         resp = requests.post(url, headers=headers, json=payload)
@@ -211,10 +230,10 @@ def store_to_dataverse(table_name: str, payload: dict, token: str) -> dict:
 def get_dataverse_record_by_url(entity_url: str, token: str) -> dict:
     try:
         headers = {
-            "Authorization":    f"Bearer {token}",
-            "Accept":           "application/json",
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
             "OData-MaxVersion": "4.0",
-            "OData-Version":    "4.0",
+            "OData-Version": "4.0",
         }
         resp = requests.get(entity_url, headers=headers)
         resp.raise_for_status()
@@ -225,4 +244,3 @@ def get_dataverse_record_by_url(entity_url: str, token: str) -> dict:
     except Exception:
         logging.exception("Error fetching record by URL")
     return {}
- 
