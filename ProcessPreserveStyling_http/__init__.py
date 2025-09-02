@@ -21,20 +21,25 @@ logging.basicConfig(
 # =============================================================================
 # ============================== CONFIG / CONSTANTS ===========================
 # =============================================================================
+
 # -- System prompt for alignment API --
 SYSTEM_PROMPT = (
     "You align styled phrases from a source text to contiguous spans in a translated text.\n\n"
+    "Return EXACTLY this JSON object with DOUBLE-QUOTED strings and NO extra fields:\n"
+    "{\n"
+    '  "bold": ["sourceBoldA****targetBoldA", "sourceBoldB****targetBoldB"],\n'
+    '  "italics": ["sourceItalicA****targetItalicA","sourceItalicB****targetItalicB"],\n'
+    '  "underline": ["sourceUnderlineA****targetUnderlineA","sourceUnderlineB****targetUnderlineB"]\n'
+    "}\n"
     "Rules:\n"
-    "- For each source phrase in each list (bold, italics, underline), choose the single best contiguous "
-    "substring from the translated text that represents the same semantic content.\n"
-    "- Search can be case- and diacritic-insensitive, but the OUTPUT must use the exact substring as it "
-    "appears in the translated text.\n"
+    "- For each source phrase in each list (bold, italics, underline), choose the single best contiguous substring from the translated text that represents the same semantic content.\n"
+    "- Case/diacritic-insensitive search is OK, but OUTPUT must use the exact substring as it appears in the translated text.\n"
     "- Prefer left-to-right, non-overlapping placements within each style list. Overlaps across styles are allowed.\n"
-    "- Include clitics/determiners/particles if attached or essential in the target language.\n"
-    '- If a phrase does not appear (or not confident), map it to an empty target ("").\n'
-    "- Do NOT hallucinate content.\n"
-    "- IMPORTANT: Return a raw JSON object only. Do not include code fences, backticks, or any prose.\n"
-    "- IMPORTANT FORMAT: For every aligned item, return a string formatted exactly as 'source****target'."
+    "- Include clitics/determiners/particles if essential in the target language.\n"
+    "- When the source phrase is a number (e.g., 100), match it directly to the identical number in the target text if present.\n"
+    '- If a phrase does not appear or you are not confident, output the empty string as the target (e.g., "source****").\n'
+    "- DO NOT hallucinate content.\n"
+    "- IMPORTANT: Output ONLY the raw JSON object as above example. No code fences, no prose, no trailing commas.\n"
 )
 
 # -- Special keys per request type --
@@ -192,7 +197,8 @@ def get_dataverse_client() -> DataverseClient:
 _WORD_CH = re.compile(
     r"[0-9A-Za-zÀ-ÿ\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0590-\u05FF\u0600-\u06FF\u0900-\u097F\u4E00-\u9FFF]"
 )
-TRIM_EDGE = re.compile(r"^[^\w~]+|[^\w~]+$", flags=re.UNICODE)
+# TRIM_EDGE = re.compile(r"^[^\w~]+|[^\w~]+$", flags=re.UNICODE)
+TRIM_EDGE = re.compile(r"^[^\w~(]+|[^\w~)]+$", flags=re.UNICODE)
 
 
 def _normalize_style_name(name: str) -> str:
@@ -238,6 +244,19 @@ def _parse_styles(raw) -> List[Dict[str, Any]]:
 
 def _is_word_char(ch: str) -> bool:
     return bool(ch and (_WORD_CH.match(ch) or ch in "'-"))
+
+
+def _coerce_brace_list_to_array(text: str) -> Optional[List[str]]:
+    t = (text or "").strip()
+    # Looks like: {"a","b","c"} with NO colons anywhere
+    if t.startswith("{") and t.endswith("}") and ":" not in t:
+        try:
+            arr = json.loads("[" + t[1:-1] + "]")
+            if isinstance(arr, list) and all(isinstance(x, str) for x in arr):
+                return arr
+        except Exception:
+            return None
+    return None
 
 
 def _expand_to_word_boundaries(text: str, start: int, end: int) -> Tuple[int, int]:
@@ -469,22 +488,82 @@ def call_alignment_api(
 
         if isinstance(content, str):
             raw = _strip_code_fences(content)
+
+            # 1) Try normal JSON parse
             parsed = None
             try:
                 parsed = json.loads(raw)
             except Exception:
+                # 2) Try to extract the first JSON object from prose
                 maybe = _extract_first_json_object(raw)
                 if maybe:
-                    parsed = json.loads(maybe)
+                    try:
+                        parsed = json.loads(maybe)
+                    except Exception:
+                        parsed = None
+
+            # 3) SPECIAL FALLBACK: brace-wrapped list → array → split into buckets
+            if parsed is None:
+                brace_list = _coerce_brace_list_to_array(raw)
+                if brace_list is not None:
+                    bN = len(bold_array)
+                    iN = len(italics_array)
+                    uN = len(underlined_array)
+                    total = bN + iN + uN
+                    # Only trust if lengths match
+                    if len(brace_list) == total:
+                        obj = {
+                            "bold": brace_list[0:bN],
+                            "italics": brace_list[bN : bN + iN],
+                            "underline": brace_list[bN + iN : bN + iN + uN],
+                        }
+                        logging.info(
+                            "Applied brace-list fallback to reconstruct alignment object."
+                        )
+                        return _ensure_alignment_keys(obj)
+
             if parsed is None:
                 raise ValueError(
                     f"Alignment API did not return valid JSON content: {content!r}"
                 )
-            obj = _ensure_alignment_keys(parsed)
-        elif isinstance(content, dict):
-            obj = _ensure_alignment_keys(content)
-        else:
-            raise ValueError("Unexpected alignment API response structure")
+
+            if isinstance(parsed, list):
+                # Flat list returned; best-effort split by counts
+                bN = len(bold_array)
+                iN = len(italics_array)
+                uN = len(underlined_array)
+                obj = {
+                    "bold": parsed[0:bN],
+                    "italics": parsed[bN : bN + iN],
+                    "underline": parsed[bN + iN : bN + iN + uN],
+                }
+            elif isinstance(parsed, dict):
+                obj = parsed
+            else:
+                raise ValueError(
+                    "Unexpected alignment API response structure (string mode)."
+                )
+
+            obj = _ensure_alignment_keys(obj)
+
+        # if isinstance(content, str):
+        #     raw = _strip_code_fences(content)
+        #     parsed = None
+        #     try:
+        #         parsed = json.loads(raw)
+        #     except Exception:
+        #         maybe = _extract_first_json_object(raw)
+        #         if maybe:
+        #             parsed = json.loads(maybe)
+        #     if parsed is None:
+        #         raise ValueError(
+        #             f"Alignment API did not return valid JSON content: {content!r}"
+        #         )
+        #     obj = _ensure_alignment_keys(parsed)
+        # elif isinstance(content, dict):
+        #     obj = _ensure_alignment_keys(content)
+        # else:
+        #     raise ValueError("Unexpected alignment API response structure")
 
         logging.info(
             f"APIM response: bold={len(obj['bold'])}, italics={len(obj['italics'])}, underline={len(obj['underline'])}"
