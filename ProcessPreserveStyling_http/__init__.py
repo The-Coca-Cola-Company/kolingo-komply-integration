@@ -197,7 +197,7 @@ def get_dataverse_client() -> DataverseClient:
 _WORD_CH = re.compile(
     r"[0-9A-Za-zÀ-ÿ\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0590-\u05FF\u0600-\u06FF\u0900-\u097F\u4E00-\u9FFF]"
 )
-# TRIM_EDGE = re.compile(r"^[^\w~]+|[^\w~]+$", flags=re.UNICODE)
+#TRIM_EDGE = re.compile(r"^[^\w~]+|[^\w~]+$", flags=re.UNICODE)
 TRIM_EDGE = re.compile(r"^[^\w~(]+|[^\w~)]+$", flags=re.UNICODE)
 
 
@@ -206,9 +206,9 @@ def _normalize_style_name(name: str) -> str:
         s = (name or "").upper()
         if s in ("BOLDED",):
             s = "BOLD"
-        if s in ("ITALICS", "ITALICIZED", "INCLUDED"):
+        if s in ("ITALICS", "ITALICIZED"):
             s = "ITALIC"
-        if s in ("UNDERLINED",):
+        if s in ("UNDERLINED"):
             s = "UNDERLINE"
         return s
     except Exception:
@@ -273,18 +273,18 @@ def _expand_to_word_boundaries(text: str, start: int, end: int) -> Tuple[int, in
         raise
 
 
-def _trim_edges_keep_tilde(s: str) -> str:
-    try:
-        if s == "~":
-            return s
-        return TRIM_EDGE.sub("", s)
-    except Exception:
-        logging.exception("_trim_edges_keep_tilde failed")
-        raise
+# def _trim_edges_keep_tilde(s: str) -> str:
+#     try:
+#         if s == "~":
+#             return s
+#         return TRIM_EDGE.sub("", s)
+#     except Exception:
+#         logging.exception("_trim_edges_keep_tilde failed")
+#         raise
 
 
 def extract_words_by_style(
-    payload: Dict[str, Any], snap_to_word: bool = True, dedupe: bool = True
+    payload: Dict[str, Any], snap_to_word: bool = False, dedupe: bool = True
 ) -> Dict[str, List[str]]:
     try:
         src = payload.get("value") or ""
@@ -301,9 +301,11 @@ def extract_words_by_style(
                 if style not in ("BOLD", "ITALIC", "UNDERLINE"):
                     continue
                 si, sj = (start, end)
-                if snap_to_word:
-                    si, sj = _expand_to_word_boundaries(src, start, end)
-                chunk = _trim_edges_keep_tilde(src[si:sj].strip())
+                # if snap_to_word:
+                #     si, sj = _expand_to_word_boundaries(src, start, end)
+                #chunk = _trim_edges_keep_tilde(src[si:sj].strip())
+                # No trimming — keep punctuation/commas/colons/etc.
+                chunk = src[si:sj]
                 if not chunk:
                     continue
                 items.append((style, si, chunk))

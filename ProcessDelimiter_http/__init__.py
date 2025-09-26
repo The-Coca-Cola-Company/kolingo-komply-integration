@@ -92,31 +92,107 @@ def get_delimiters_for_language(language):
         return [","]
 
 
+# def build_split_pattern(delimiters):
+#     """Build a regex pattern to split on any of the provided delimiters."""
+#     escaped = sorted((re.escape(d) for d in delimiters), key=len, reverse=True)
+#     pattern_str = "|".join(escaped)
+#     try:
+#         return re.compile(pattern_str)
+#     except re.error:
+#         logging.exception("Invalid regex pattern: %s", pattern_str)
+#         return re.compile(r",")
+
+# def build_split_pattern(delimiters):
+#     escaped = []
+#     for d in delimiters:
+#         if d == ",":
+#             # match comma only if not between digits
+#             escaped.append(r"(?<!\d),(?!\d)")
+#         else:
+#             escaped.append(re.escape(d))
+#     pattern_str = "|".join(sorted(escaped, key=len, reverse=True))
+#     return re.compile(pattern_str)
+
+# def build_split_pattern(delimiters): 
+#     escaped = []
+#     for d in delimiters:
+#         if d == ",":
+#             # match comma only if not between digits
+#             escaped.append(r"(?<!\d),(?!\d)")
+#         elif d == ".":
+#             # match period only if not between digits
+#             escaped.append(r"(?<!\d)\.(?!\d)")
+#         else:
+#             escaped.append(re.escape(d))
+#     pattern_str = "|".join(sorted(escaped, key=len, reverse=True))
+#     return re.compile(pattern_str)
+
 def build_split_pattern(delimiters):
-    """Build a regex pattern to split on any of the provided delimiters."""
-    escaped = sorted((re.escape(d) for d in delimiters), key=len, reverse=True)
-    pattern_str = "|".join(escaped)
-    try:
-        return re.compile(pattern_str)
-    except re.error:
-        logging.exception("Invalid regex pattern: %s", pattern_str)
-        return re.compile(r",")
+    escaped = []
+    for d in delimiters:
+        if d == ",":
+            # match comma unless both sides are digits
+            escaped.append(r"(?<!\d),(?!\d)")
+        elif d == ".":
+            # match dot unless both sides are digits
+            escaped.append(r"(?<!\d)\.(?!\d)")
+        else:
+            escaped.append(re.escape(d))
+    pattern_str = "|".join(sorted(escaped, key=len, reverse=True))
+    return re.compile(pattern_str)
+
+def split_preserve_numbers(text, delimiters):
+    """Split text on given delimiters, but preserve commas/periods between digits."""
+    # Build a regex to match all delimiters
+    pattern = "|".join(re.escape(d) for d in delimiters)
+    result = []
+    start = 0
+    for m in re.finditer(pattern, text):
+        sep = m.group()
+        idx = m.start()
+
+        # Preserve comma or period if it is between digits
+        if sep in {",", "."}:
+            if idx > 0 and idx < len(text) - 1:
+                if text[idx - 1].isdigit() and text[idx + 1].isdigit():
+                    continue  # skip this delimiter
+
+        # Split here
+        result.append(text[start:idx].strip())
+        start = idx + 1
+
+    result.append(text[start:].strip())
+    return [r for r in result if r]
 
 
 def split_ingredient_units(text, regional_delims):
     """Split ingredient list text using regional + static punctuation delimiters."""
     static = {",", ":", ";", "(", ")", "[", "]"}
     delimiters = regional_delims | static
-    regex = build_split_pattern(delimiters)
-    return [seg.strip() for seg in regex.split(text) if seg.strip()]
+    return split_preserve_numbers(text, delimiters)
 
 
 def split_legalname_units(text, regional_delims):
-    """Split legal name text using regional + space, period, comma; ignore hyphens."""
-    static = {" ", ".", ","}
-    delimiters = (regional_delims | static) - {"-"}
-    regex = build_split_pattern(delimiters)
-    return [seg.strip() for seg in regex.split(text) if seg.strip()]
+    """Split legal name text using only period and comma (ignore numbers inside)."""
+    static = {".", ","}
+    return split_preserve_numbers(text, static)
+
+
+# def split_ingredient_units(text, regional_delims):
+#     """Split ingredient list text using regional + static punctuation delimiters."""
+#     static = {",", ":", ";", "(", ")", "[", "]"}
+#     delimiters = regional_delims | static
+#     regex = build_split_pattern(delimiters)
+#     return [seg.strip() for seg in regex.split(text) if seg.strip()]
+
+
+# def split_legalname_units(text, regional_delims):
+#     """Split legal name text using regional + space, period, comma; ignore hyphens."""
+#     #static = {" ", ".", ","}
+#     static = {".", ","}
+#     #delimiters = (regional_delims | static) - {"-"}
+#     regex = build_split_pattern(static)
+#     return [seg.strip() for seg in regex.split(text) if seg.strip()]
 
 
 def split_units(text, language, field_name):
