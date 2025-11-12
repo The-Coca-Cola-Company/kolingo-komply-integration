@@ -448,7 +448,8 @@ def call_alignment_api(
             raise RuntimeError("ALIGN_API_URL is not configured.")
         headers = {"Content-Type": "application/json"}
         if api_key:
-            headers["Ocp-Apim-Subscription-Key"] = api_key
+            #headers["Ocp-Apim-Subscription-Key"] = api_key #this is updated after we moved from Azure APIM to AI Foundry
+            headers["Authorization"] = api_key
 
         inputs = {
             "translated_language": translated_language,
