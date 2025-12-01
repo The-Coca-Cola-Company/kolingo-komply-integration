@@ -4,3 +4,4 @@
 
 azure-functions
 azure.identity
+#openai>=1.52.0

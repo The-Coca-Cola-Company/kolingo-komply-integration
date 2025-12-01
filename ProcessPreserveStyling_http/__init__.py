@@ -197,7 +197,7 @@ def get_dataverse_client() -> DataverseClient:
 _WORD_CH = re.compile(
     r"[0-9A-Za-zÀ-ÿ\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0590-\u05FF\u0600-\u06FF\u0900-\u097F\u4E00-\u9FFF]"
 )
-#TRIM_EDGE = re.compile(r"^[^\w~]+|[^\w~]+$", flags=re.UNICODE)
+# TRIM_EDGE = re.compile(r"^[^\w~]+|[^\w~]+$", flags=re.UNICODE)
 TRIM_EDGE = re.compile(r"^[^\w~(]+|[^\w~)]+$", flags=re.UNICODE)
 
 
@@ -303,7 +303,7 @@ def extract_words_by_style(
                 si, sj = (start, end)
                 # if snap_to_word:
                 #     si, sj = _expand_to_word_boundaries(src, start, end)
-                #chunk = _trim_edges_keep_tilde(src[si:sj].strip())
+                # chunk = _trim_edges_keep_tilde(src[si:sj].strip())
                 # No trimming — keep punctuation/commas/colons/etc.
                 chunk = src[si:sj]
                 if not chunk:
@@ -448,7 +448,7 @@ def call_alignment_api(
             raise RuntimeError("ALIGN_API_URL is not configured.")
         headers = {"Content-Type": "application/json"}
         if api_key:
-            #headers["Ocp-Apim-Subscription-Key"] = api_key #this is updated after we moved from Azure APIM to AI Foundry
+            # headers["Ocp-Apim-Subscription-Key"] = api_key #this is updated after we moved from Azure APIM to AI Foundry
             headers["Authorization"] = api_key
 
         inputs = {
@@ -461,6 +461,7 @@ def call_alignment_api(
                 "underline": underlined_array,
             },
         }
+        # "temperature": 0,
         body = {
             "temperature": 0,
             "messages": [
