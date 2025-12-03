@@ -42,7 +42,7 @@ def get_dataverse_token() -> str:
     return token.token
 
 
-def safe_get(value, default="N/A"):
+def safe_get(value, default=""):
     """Return a default if the value is None or empty."""
     if value is None:
         return default
