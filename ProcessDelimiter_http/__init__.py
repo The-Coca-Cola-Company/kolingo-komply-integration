@@ -91,42 +91,6 @@ def get_delimiters_for_language(language):
         logging.exception("Error retrieving delimiters for '%s'", language)
         return [","]
 
-
-# def build_split_pattern(delimiters):
-#     """Build a regex pattern to split on any of the provided delimiters."""
-#     escaped = sorted((re.escape(d) for d in delimiters), key=len, reverse=True)
-#     pattern_str = "|".join(escaped)
-#     try:
-#         return re.compile(pattern_str)
-#     except re.error:
-#         logging.exception("Invalid regex pattern: %s", pattern_str)
-#         return re.compile(r",")
-
-# def build_split_pattern(delimiters):
-#     escaped = []
-#     for d in delimiters:
-#         if d == ",":
-#             # match comma only if not between digits
-#             escaped.append(r"(?<!\d),(?!\d)")
-#         else:
-#             escaped.append(re.escape(d))
-#     pattern_str = "|".join(sorted(escaped, key=len, reverse=True))
-#     return re.compile(pattern_str)
-
-# def build_split_pattern(delimiters): 
-#     escaped = []
-#     for d in delimiters:
-#         if d == ",":
-#             # match comma only if not between digits
-#             escaped.append(r"(?<!\d),(?!\d)")
-#         elif d == ".":
-#             # match period only if not between digits
-#             escaped.append(r"(?<!\d)\.(?!\d)")
-#         else:
-#             escaped.append(re.escape(d))
-#     pattern_str = "|".join(sorted(escaped, key=len, reverse=True))
-#     return re.compile(pattern_str)
-
 def build_split_pattern(delimiters):
     escaped = []
     for d in delimiters:
@@ -178,23 +142,6 @@ def split_legalname_units(text, regional_delims):
     return split_preserve_numbers(text, static)
 
 
-# def split_ingredient_units(text, regional_delims):
-#     """Split ingredient list text using regional + static punctuation delimiters."""
-#     static = {",", ":", ";", "(", ")", "[", "]"}
-#     delimiters = regional_delims | static
-#     regex = build_split_pattern(delimiters)
-#     return [seg.strip() for seg in regex.split(text) if seg.strip()]
-
-
-# def split_legalname_units(text, regional_delims):
-#     """Split legal name text using regional + space, period, comma; ignore hyphens."""
-#     #static = {" ", ".", ","}
-#     static = {".", ","}
-#     #delimiters = (regional_delims | static) - {"-"}
-#     regex = build_split_pattern(static)
-#     return [seg.strip() for seg in regex.split(text) if seg.strip()]
-
-
 def split_units(text, language, field_name):
     """Dispatch splitting logic based on the field_name."""
     if not text or not field_name:
@@ -214,6 +161,13 @@ def split_units(text, language, field_name):
 def split_and_merge_texts_for_languages(text1, lang1, text2, lang2, field_name):
     """Split two texts and merge them into paired segments."""
     parts1 = split_units(text1, lang1, field_name)
+    
+    if lang2 in ["thai", "th", "lao", "lo"]:
+        parts1 = post_process_for_thai_lao(parts1)
+
+    elif lang2 in ["japanese", "ja"]:
+        parts1 = post_process_for_japanese(parts1)
+    
     parts2 = split_units(text2, lang2, field_name)
     if len(parts1) != len(parts2):
         logging.warning(
@@ -234,6 +188,54 @@ def translate_string(main_str, source_arr, target_arr):
         pattern = rf"(?<!\w){re.escape(src)}(?!\w)"
         result = re.sub(pattern, tgt, result)
     return result
+
+
+def post_process_for_thai_lao(segments):
+    """For Thai and Lao: further split each segment by whitespace and normalize."""
+    final = []
+    for seg in segments:
+        # Split by space
+        parts = seg.split()
+        # Normalize: trim + drop empty
+        clean = [p.strip() for p in parts if p.strip()]
+        final.extend(clean)
+    return final
+
+
+def post_process_for_japanese(segments):
+    """For Japanese: split each segment by slash '/' and normalize."""
+    final = []
+    for seg in segments:
+        parts = seg.split("/")
+        clean = [p.strip() for p in parts if p.strip()]
+        final.extend(clean)
+    return final
+
+
+def get_translation_concatenator(token, target_language):
+    """
+    Fetch the TranslationConcatenator value for a given target language
+    from cococola_tccc_languagedelimitermapping.
+    """
+
+    filter_clause = f"cococola_languagename eq '{target_language}'"
+    select_clause = "cococola_languagename,cococola_concatenator"
+
+    records = fetch_records(
+        token,
+        "cococola_tccc_languagedelimitermapping",
+        filter_clause=filter_clause,
+        select_clause=select_clause,
+    )
+
+    if not records:
+        logging.warning("No concatenator found for language '%s'", target_language)
+        return None
+
+    row = records[0]
+
+    return row.get("cococola_concatenator") or None
+
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -257,6 +259,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         if process == "TranslationStep1":
             text = payload.get("text")
             language = payload.get("language")
+            target_lang = payload.get("targetLanguage", "").lower()
             if not text or not language or not field_name:
                 logging.error("Missing params for TranslationStep1.")
                 return func.HttpResponse(
@@ -265,12 +268,21 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     mimetype="application/json",
                 )
             segments = split_units(text, language, field_name)
+
+            if target_lang in ["thai", "th", "lao", "lo"]:
+                segments = post_process_for_thai_lao(segments)
+
+            elif target_lang in ["japanese", "ja"]:
+                segments = post_process_for_japanese(segments)
+
             result = {"segments": segments}
 
         elif process == "TranslationStep2":
             main_str = payload.get("main_string")
             src = payload.get("source_array")
             tgt = payload.get("target_array")
+            target_language = payload.get("targetLanguage")  # NEW
+            
             if not main_str or not isinstance(src, list) or not isinstance(tgt, list):
                 logging.error("Missing params for TranslationStep2.")
                 return func.HttpResponse(
@@ -278,7 +290,22 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     status_code=400,
                     mimetype="application/json",
                 )
-            result = {"translated": translate_string(main_str, src, tgt)}
+
+            translated = translate_string(main_str, src, tgt)
+            
+            try:
+                if target_language:
+                    token = generate_dataverse_token()
+                    concat = get_translation_concatenator(token, target_language)
+
+                    if concat:
+                        logging.info("Applying concatenator '%s' for language '%s'", concat, target_language)
+                        translated = translated.replace(",", concat)
+
+            except Exception as e:
+                logging.error("Failed to apply concatenator for '%s': %s", target_language, e)
+            
+            result = {"translated": translated}
 
         elif process == "Catalog":
             t1 = payload.get("text1")
