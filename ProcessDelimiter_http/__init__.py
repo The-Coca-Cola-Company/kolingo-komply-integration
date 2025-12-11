@@ -162,10 +162,10 @@ def split_and_merge_texts_for_languages(text1, lang1, text2, lang2, field_name):
     """Split two texts and merge them into paired segments."""
     parts1 = split_units(text1, lang1, field_name)
     
-    if lang2 in ["thai", "th", "lao", "lo"]:
+    if lang2.lower() in ["thai", "th", "lao", "lo"]:
         parts1 = post_process_for_thai_lao(parts1)
 
-    elif lang2 in ["japanese", "ja"]:
+    elif lang2.lower() in ["japanese", "ja"]:
         parts1 = post_process_for_japanese(parts1)
     
     parts2 = split_units(text2, lang2, field_name)
